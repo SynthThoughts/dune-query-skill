@@ -14,178 +14,186 @@ An AI skill that enhances on-chain data analysis by combining **semantic table s
   → [Without API key] Outputs SQL for you to paste into dune.com
 ```
 
-## How It Works
+## Installation Modes
 
-### Two Operating Modes
+Choose based on what API keys you have:
 
-| Mode | Requirements | What Happens |
-|------|-------------|--------------|
-| **Full** | Dune API key + Dune MCP | Find tables → Generate SQL → Execute on Dune → Return results & charts |
-| **Offline** | This skill only | Find tables → Generate SQL → Output code for manual execution |
+| Mode | Download | Best For | Requires |
+|------|----------|----------|----------|
+| **Lite** | ~50KB (repo only) | Have Dune API key, MCP handles table discovery | Dune MCP |
+| **Standard** | +18MB | Want offline semantic search, no external API | Nothing extra |
+| **Full** | +56MB | Want highest precision search | Gemini API key or Google Cloud ADC |
 
-### Adaptive Table Discovery
-
-The skill outputs an `embedding` field indicating search quality, which controls trust level:
-
-| Embedding | Similarity Range | Trust Level | Strategy |
-|-----------|-----------------|-------------|----------|
-| **gemini** | 0.60-0.80 | High | Skill results are primary; MCP supplements with schema |
-| **gemini** | 0.45-0.60 | Moderate | Cross-check with MCP |
-| **local** | 0.30-0.50 | Low | MCP is primary (if available); Skill is secondary reference |
-
-```
-User: "aave lending borrow"
-
-Gemini embedding (high trust):
-  aave_borrow                          0.744  ← precise match
-  aave_ethereum_borrow                 0.738
-  lending_ethereum_base_borrow         0.725
-
-Local MiniLM (low trust):
-  kamino_solana.klend_evt_borrow       0.487  ← cross-protocol noise
-  aave.borrow                          0.451
-  lending_ethereum_base_borrow         0.412
-```
-
-### Embedding Priority
-
-Query-time embedding is automatically selected:
-
-1. **Vertex AI SDK** — free, uses Google Cloud ADC credentials (`~/.config/gcloud/application_default_credentials.json`)
-2. **Gemini REST API** — needs `GEMINI_API_KEY` environment variable
-3. **Local MiniLM** — no API needed, runs offline, lower quality
-
-The pre-built index ships with both Gemini (768d) and MiniLM (384d) embeddings. Gemini embeddings are used when a compatible query embedding is available; otherwise falls back to local.
-
-## Repository Structure
-
-```
-dune-query-skill/
-├── SKILL.md                          # AI instruction file (loaded by Claude Code / Cursor / etc.)
-├── scripts/
-│   └── dune_table_indexer.py         # Semantic search engine (index, search, list)
-├── references/
-│   ├── query-patterns.md             # DuneSQL templates by sector (DEX, lending, NFT, etc.)
-│   └── sectors.md                    # Spellbook sector reference (table schemas, partitions)
-└── data/
-    └── chroma_db/                    # Pre-built ChromaDB vector index (Git LFS)
-        ├── chroma.sqlite3            # Metadata + embeddings store (~65MB)
-        ├── *.config.json             # Collection configs (embedding type, dimensions)
-        └── <uuid>/                   # HNSW index files (4 collections)
-```
-
-### Pre-built Index Contents
-
-| Collection | Items | Source | Embedding |
-|-----------|-------|--------|-----------|
-| `decoded` | 2,139 | Decoded contract events/calls (Kamino, Aave, etc.) | MiniLM 384d |
-| `decoded_gemini` | 2,139 | Same tables, Gemini embeddings | Gemini 768d |
-| `spellbook` | 7,973 | Spellbook models (all sectors, all chains) | MiniLM 384d |
-| `spellbook_gemini` | 7,973 | Same models, Gemini embeddings | Gemini 768d |
-
-**Decoded tables breakdown** (2,139 tables):
-- Events: 1,039 | Swaps: 174 | Deposits: 40 | Borrows: 12 | Withdrawals: 35
-- Admin/config: 72 | Fees/rewards: 37 | Transfers: 6 | Other: 724
-
-**Spellbook models breakdown** (7,973 models):
-- Swaps: 1,584 | Transfers: 865 | Deposits: 581 | Pools: 531 | Balances: 411
-- Fees/rewards: 249 | Withdrawals: 163 | Flashloans: 140 | Borrows: 130 | Bridges: 92
-- Airdrops: 95 | Prices: 92 | Mints: 34 | Governance: 20 | Other: 2,974
-
-Each table entry stores: table name, category, ABI type, function classification, financial column flags, and page_rank score. No raw document text is stored (embeddings + metadata only, optimized to 109MB).
-
-### Key Files
-
-**`SKILL.md`** — The instruction file that AI assistants read. Contains:
-- Intent classification (sector → table mapping)
-- Adaptive table discovery strategy (Gemini vs local trust levels)
-- DuneSQL rules (partitions, decimals, price joins, Solana base58)
-- Full vs Offline mode logic
-- Cross-table join patterns
-
-**`scripts/dune_table_indexer.py`** — CLI tool with three commands:
-- `index` — Build/update the ChromaDB index from crawled table JSON
-- `search` — Semantic search with filters (`--category`, `--function`, `--has-amount`, `--json`)
-- `list` — Show all indexed collections with stats
-
-**`references/`** — Domain knowledge loaded on demand:
-- `query-patterns.md` — DuneSQL templates (time functions, aggregations, CTEs)
-- `sectors.md` — Spellbook sector schemas (DEX, lending, NFT, tokens, gas, bridges, staking)
-
-## Installation
-
-### Prerequisites
+### Quick Start
 
 ```bash
+git clone https://github.com/SynthThoughts/dune-query-skill
+cd dune-query-skill
 pip install chromadb
+./setup.sh          # Interactive: choose Lite / Standard / Full
 ```
-
-Optional (for Gemini-quality search):
-- Google Cloud ADC: `gcloud auth application-default login` (free, uses Vertex AI SDK)
-- Or set `GEMINI_API_KEY` environment variable
 
 ### Claude Code
 
 ```bash
-# Install the skill
-claude skill add --from https://github.com/SynthThoughts/dune-query-skill
+# 1. Clone and setup
+git clone https://github.com/SynthThoughts/dune-query-skill ~/.claude/skills/dune-query-skill
+cd ~/.claude/skills/dune-query-skill
+pip install chromadb
+./setup.sh
 
-# For full mode, also add Dune MCP:
+# 2. (Optional) Add Dune MCP for query execution
 claude mcp add dune -e DUNE_API_KEY=your_key -- npx -y @duneanalytics/mcp-server
 ```
 
 ### Cursor / Windsurf / Other AI IDEs
 
-Add to your project's `.cursor/rules` or equivalent AI instruction file:
+```bash
+git clone https://github.com/SynthThoughts/dune-query-skill path/to/dune-query-skill
+cd path/to/dune-query-skill
+pip install chromadb
+./setup.sh
+```
 
+Then add to your AI instruction file (`.cursor/rules`, etc.):
 ```
 Read and follow the instructions in path/to/dune-query-skill/SKILL.md
 ```
 
-Then ensure the `scripts/` and `data/` directories are accessible from your project.
-
 ### AI-Friendly Installation Command
 
-Paste this to any AI assistant to have it set up the skill automatically:
+Paste this to any AI assistant to set up the skill automatically:
 
 ```
-Clone https://github.com/SynthThoughts/dune-query-skill to ~/.claude/skills/dune-query-skill (or your preferred location). Then:
+Install the Dune Query Skill from https://github.com/SynthThoughts/dune-query-skill:
 
-1. Run: pip install chromadb
-2. Verify the index: python scripts/dune_table_indexer.py list
-   — Should show 4 collections: decoded (2139), decoded_gemini (2139), spellbook (7973), spellbook_gemini (7973)
-3. Test search: python scripts/dune_table_indexer.py search "DEX trading volume" -c all
-   — Should return tables like dex.trades, dex_aggregator.trades with similarity scores
-4. Read SKILL.md and follow its workflow for all future on-chain data analysis requests
+1. git clone https://github.com/SynthThoughts/dune-query-skill ~/.claude/skills/dune-query-skill
+2. cd ~/.claude/skills/dune-query-skill && pip install chromadb
+3. Run ./setup.sh — choose mode based on available API keys:
+   - Lite (have Dune API key, MCP handles table discovery)
+   - Standard (want offline search, no API needed)
+   - Full (have Gemini API key or Google Cloud ADC for highest quality)
+4. Verify: python3 scripts/dune_table_indexer.py list
+5. Test: python3 scripts/dune_table_indexer.py search "DEX trading volume" -c all
+6. Read SKILL.md and follow its workflow for all on-chain data analysis
 
-Optional Gemini embedding setup (higher quality search):
-- If user has gcloud CLI: gcloud auth application-default login
-- Or set GEMINI_API_KEY env var
-- Verify: python scripts/dune_table_indexer.py search "aave borrow" -c all
-  — Output should show "Embedding: gemini" (not "local")
+Optional Dune MCP (for executing queries, not just generating SQL):
+  claude mcp add dune -e DUNE_API_KEY=<key> -- npx -y @duneanalytics/mcp-server
 
-Optional Dune MCP setup (for query execution):
-- Need a Dune API key from https://dune.com/settings/api
-- Claude Code: claude mcp add dune -e DUNE_API_KEY=<key> -- npx -y @duneanalytics/mcp-server
-- Other: add Dune MCP server to your MCP config
+Optional Gemini (for high-quality search, Full mode only):
+  gcloud auth application-default login   # or export GEMINI_API_KEY=your_key
 ```
+
+## How It Works
+
+### Operating Modes
+
+| Capability | Lite (MCP only) | Standard (MiniLM) | Full (Gemini) |
+|-----------|-----------------|-------------------|---------------|
+| Table discovery | MCP keyword search | Local semantic search | High-precision semantic search |
+| SQL generation | Yes | Yes | Yes |
+| Query execution | Yes (via MCP) | No (output SQL) | No (output SQL) |
+| + Dune MCP | — | Yes (via MCP) | Yes (via MCP) |
+| Offline capable | No | Yes | No (needs API at query time) |
+
+### Adaptive Table Discovery
+
+The skill outputs an `embedding` field indicating search quality, which controls trust level:
+
+```
+User: "aave lending borrow"
+
+Gemini embedding (high trust, similarity 0.6-0.8):
+  aave_borrow                          0.744  ← precise match
+  aave_ethereum_borrow                 0.738
+  lending_ethereum_base_borrow         0.725
+  → Skill results are PRIMARY; MCP supplements with schema
+
+Local MiniLM (low trust, similarity 0.3-0.5):
+  kamino_solana.klend_evt_borrow       0.487  ← cross-protocol noise
+  aave.borrow                          0.451
+  lending_ethereum_base_borrow         0.412
+  → MCP is PRIMARY (if available); Skill is secondary reference
+```
+
+**Trust calibration:**
+- Gemini similarity >= 0.60 → high confidence, table is relevant
+- Gemini similarity 0.45-0.60 → moderate, cross-check with MCP
+- Local MiniLM → always cross-check with MCP if available
+- MCP page_rank >= 5.0 → widely used table, prefer over low-pagerank alternatives
+
+### Embedding Priority
+
+Query-time embedding is automatically selected:
+
+1. **Vertex AI SDK** — free, uses Google Cloud ADC (`gcloud auth application-default login`)
+2. **Gemini REST API** — needs `GEMINI_API_KEY` environment variable
+3. **Local MiniLM** — no API needed, runs fully offline, lower quality
+
+## Repository Structure
+
+```
+dune-query-skill/
+├── SKILL.md                          # AI instruction file (the "brain")
+├── setup.sh                          # Interactive installer (choose Lite/Standard/Full)
+├── scripts/
+│   └── dune_table_indexer.py         # Semantic search engine (index, search, list)
+├── references/
+│   ├── query-patterns.md             # DuneSQL templates by sector
+│   └── sectors.md                    # Spellbook sector reference
+└── data/
+    └── chroma_db/                    # Vector index (downloaded via setup.sh)
+```
+
+### Pre-built Index Contents
+
+| Collection | Items | Source | Embedding | In Standard | In Full |
+|-----------|-------|--------|-----------|:-----------:|:-------:|
+| `decoded` | 2,139 | Contract events/calls | MiniLM 384d | Yes | Yes |
+| `spellbook` | 7,973 | Spellbook models | MiniLM 384d | Yes | Yes |
+| `decoded_gemini` | 2,139 | Same tables | Gemini 768d | — | Yes |
+| `spellbook_gemini` | 7,973 | Same models | Gemini 768d | — | Yes |
+
+**Decoded tables** (2,139): Events 1,039 · Swaps 174 · Deposits 40 · Borrows 12 · Withdrawals 35 · Admin 72 · Fees 37 · Other 730
+
+**Spellbook models** (7,973): Swaps 1,584 · Transfers 865 · Deposits 581 · Pools 531 · Balances 411 · Fees 249 · Withdrawals 163 · Flashloans 140 · Borrows 130 · Bridges 92 · Airdrops 95 · Prices 92 · Other 3,028
+
+Each entry stores: embeddings, table name, category, ABI type, function classification, financial column flags, page_rank. No raw document text (metadata-only, optimized for size).
+
+### Key Files
+
+**`SKILL.md`** — AI instruction file containing:
+- Intent classification (sector → table mapping)
+- Adaptive table discovery (Gemini vs local trust levels)
+- DuneSQL rules (partitions, decimals, price joins, Solana base58)
+- Full vs Offline mode switching
+- Cross-table join patterns
+
+**`scripts/dune_table_indexer.py`** — CLI with three commands:
+- `index` — Build/update ChromaDB from crawled table JSON
+- `search` — Semantic search with filters (`--category`, `--function`, `--has-amount`, `--json`)
+- `list` — Show all indexed collections with stats
+
+**`references/`** — Domain knowledge loaded on demand:
+- `query-patterns.md` — DuneSQL templates (time functions, aggregations, CTEs)
+- `sectors.md` — Sector schemas (DEX, lending, NFT, tokens, gas, bridges, staking)
 
 ## Usage Examples
 
-### Direct CLI Search
+### CLI Search
 
 ```bash
 # Find lending tables
-python scripts/dune_table_indexer.py search "lending borrow repay" -c all
+python3 scripts/dune_table_indexer.py search "lending borrow repay" -c all
 
-# Find DEX tables with financial columns only
-python scripts/dune_table_indexer.py search "swap volume" -c all --has-amount
+# DEX tables with financial columns only
+python3 scripts/dune_table_indexer.py search "swap volume" -c all --has-amount
 
 # JSON output for programmatic use
-python scripts/dune_table_indexer.py search "NFT marketplace sales" -c all --json
+python3 scripts/dune_table_indexer.py search "NFT marketplace sales" -c all --json
 
 # Filter by function type
-python scripts/dune_table_indexer.py search "liquidity" -c all -f deposit
+python3 scripts/dune_table_indexer.py search "liquidity" -c all -f deposit
 ```
 
 ### Through AI Assistant
@@ -197,94 +205,64 @@ Just ask naturally:
 - "Compare DEX volume across Ethereum, Arbitrum, and Base"
 - "Find all liquidation events on lending protocols this month"
 
-The skill handles table discovery, SQL generation, and (with Dune MCP) execution automatically.
-
 ## Extending the Index
 
-### Add More Decoded Tables
-
-Use Dune MCP to crawl a protocol's decoded tables, then index them:
+### Add Decoded Tables for a Protocol
 
 ```bash
-# 1. Crawl via MCP (in your AI assistant)
+# 1. Crawl via Dune MCP (in your AI assistant):
 # mcp__dune__searchTables(query="uniswap", categories=["decoded"],
 #     includeSchema=true, includeMetadata=true, limit=50)
 # → Save results to data/uniswap_tables.json
 
-# 2. Index locally
-python scripts/dune_table_indexer.py index \
-  --input data/uniswap_tables.json \
-  --collection decoded
-
-# 3. Build Gemini embeddings (optional, needs Vertex AI or Gemini API)
-python scripts/build_gemini_index.py
+# 2. Index
+python3 scripts/dune_table_indexer.py index \
+  --input data/uniswap_tables.json --collection decoded
 ```
 
 ### Rebuild Spellbook Index
 
-The spellbook index is built from the [Spellbook repository](https://github.com/duneanalytics/spellbook):
-
 ```bash
 git clone https://github.com/duneanalytics/spellbook /tmp/spellbook
-python scripts/dune_table_indexer.py index --spellbook /tmp/spellbook
+python3 scripts/dune_table_indexer.py index --spellbook /tmp/spellbook
 ```
 
-## Architecture Deep Dive
-
-### Query Flow
+## Architecture
 
 ```
 User Query
     │
     ├─ 1. Intent Classification
-    │     Map to sector (dex/lending/nft/tokens/...) + scope (specific protocol?)
+    │     Map to sector (dex/lending/nft/tokens/...) + scope
     │
-    ├─ 2. Table Discovery
-    │     ├─ Skill: semantic search → ranked tables with similarity scores
-    │     │   Output includes "embedding": "gemini" or "local"
-    │     │
-    │     ├─ [Full mode] MCP: keyword search → tables with full column schema
-    │     │
-    │     └─ Merge: Gemini high-trust → Skill leads; Local low-trust → MCP leads
+    ├─ 2. Table Discovery (adaptive)
+    │     ├─ Skill semantic search → ranked tables + "embedding" type
+    │     ├─ [Gemini] Skill leads, MCP supplements schema
+    │     ├─ [Local]  MCP leads, Skill supplements
+    │     └─ [Lite]   MCP only
     │
     ├─ 3. Query Construction
-    │     Apply DuneSQL rules: partition filters, decimal handling, price joins
-    │     Reference: query-patterns.md + sectors.md
+    │     DuneSQL: partition filters, decimals, price joins
+    │     Templates: query-patterns.md + sectors.md
     │
     └─ 4. Execution
-          [Full]    createQuery → execute → getResults → visualize
-          [Offline] Output SQL code block
+          [With MCP]    createQuery → execute → results → chart
+          [Without MCP] Output SQL code block → user runs on dune.com
 ```
 
 ### Embedding Architecture
 
 ```
-Index time (pre-computed, shipped in repo):
-  Table metadata → Semantic document → [MiniLM-L6 (384d)] → decoded/spellbook collections
-                                     → [Gemini-001 (768d)] → decoded_gemini/spellbook_gemini collections
+Index time (pre-computed, downloaded via setup.sh):
+  Table metadata → Semantic doc → MiniLM-L6 (384d) → decoded / spellbook
+                                → Gemini-001 (768d) → decoded_gemini / spellbook_gemini
 
-Query time (computed on each search):
-  User query → [Best available embedder] → Compare against matching collection
-               Vertex AI SDK (free)  ─┐
-               Gemini REST API ───────┤→ Search *_gemini collections
-               Local MiniLM ──────────→ Search local collections
+Query time (per search):
+  User query → Best available embedder:
+               Vertex AI SDK (free) ──┐
+               Gemini REST API ───────┤→ *_gemini collections (high quality)
+               Local MiniLM ──────────→ local collections (offline fallback)
 ```
-
-### Semantic Document Construction
-
-Each table is converted to a searchable document:
-
-```
-Table: kamino_solana.klend_evt_borrowobligationliquidity
-→ Document: "kamino klend borrow obligation liquidity | columns: owner reserve
-   liquidity_amount collateral_exchange_rate | function: borrow | has_amount: true"
-```
-
-The indexer:
-- Parses CamelCase/snake_case table names into semantic tokens
-- Extracts financial columns (amount, liquidity, collateral, usd, price)
-- Classifies function (borrow/deposit/withdraw/swap/...) via keyword matching
-- Filters boilerplate columns (evt_index, call_block_time, etc.)
 
 ## License
 
