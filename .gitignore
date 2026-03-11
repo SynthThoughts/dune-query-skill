@@ -1,0 +1,14 @@
+# Crawled table data (users crawl via Dune MCP)
+data/*_tables.json
+data/*_converted.json
+data/protocol_addresses.json
+
+# Python
+__pycache__/
+*.pyc
+
+# OS
+.DS_Store
+
+# Embedding checkpoints
+data/.checkpoint_*.json
