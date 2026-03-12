@@ -12,4 +12,4 @@ __pycache__/
 
 # Embedding checkpoints
 data/.checkpoint_*.json
-data/chroma_db/
+
